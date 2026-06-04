@@ -25,7 +25,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // ── API / Supabase requests: ALWAYS go to network, never cache
+  // Only handle GET requests — ignore HEAD, POST, PATCH, DELETE
+  if (e.request.method !== 'GET') return;
+
+  // Supabase & fonts: always network, never cache
   if (
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('fonts.googleapis.com') ||
@@ -35,11 +38,10 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // ── App shell: network first, fall back to cache
+  // App shell: network first, fall back to cache
   e.respondWith(
     fetch(e.request)
       .then(res => {
-        // Update cache with fresh response
         const resClone = res.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(e.request, resClone));
         return res;
