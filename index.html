@@ -209,7 +209,7 @@
 <script>
 // ── SUPABASE CONFIG ───────────────────────────────────────────
 const SUPABASE_URL = 'https://wraevahwzpmygjyqgtjg.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_2n6nQII4u_azQFb0GmdcKw_xM7cshS1';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'; 
 
 async function sbFetch(method, body = null, id = null) {
   const url = `${SUPABASE_URL}/rest/v1/products` + (id ? `?id=eq.${encodeURIComponent(id)}` : '');
