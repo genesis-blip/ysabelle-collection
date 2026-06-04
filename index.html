@@ -207,8 +207,47 @@
 <div class="toast" id="toast" aria-live="assertive" aria-atomic="true"></div>
 
 <script>
+// ── SUPABASE CONFIG ───────────────────────────────────────────
+const SUPABASE_URL = 'https://dtqapwmcjdvadgvbbcqg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_hrs2O8JPPR6ZgUPU27o8-w_D4hY7e7K';
+
+async function sbFetch(method, body = null, id = null) {
+  const url = `${SUPABASE_URL}/rest/v1/products` + (id ? `?id=eq.${encodeURIComponent(id)}` : '');
+  const res = await fetch(url, {
+    method,
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal',
+    },
+    body: body ? JSON.stringify(body) : null,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  if (method === 'GET' || method === 'POST') return res.json();
+  return true;
+}
+
+async function dbLoadAll() {
+  const data = await sbFetch('GET');
+  return data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+async function dbInsert(product) {
+  const row = await sbFetch('POST', product);
+  return Array.isArray(row) ? row[0] : row;
+}
+
+async function dbUpdate(id, data) {
+  await sbFetch('PATCH', data, id);
+}
+
+async function dbDelete(id) {
+  await sbFetch('DELETE', null, id);
+}
+
 // ── DATA ─────────────────────────────────────────────────────
-const STORAGE_KEY = 'blush_products_v3';
+// (no STORAGE_KEY needed — using Supabase)
 
 const PALETTE = [
   '#F5EFE6','#F2D7B8','#E8C4A0','#DB7050','#C9967A',
@@ -234,30 +273,10 @@ const CAT_GRAD  = {
 // Categories that trigger low-stock notifications
 const NOTIF_CATS = new Set(['Lip', 'Cheek']);
 
-function loadProducts() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
-  catch { return []; }
+// FIX 1: Removed extra opening brace inside uid()
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
-function saveProducts(arr) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-}
-
-function seedIfEmpty() {
-  if (loadProducts().length > 0) return;
-  const seed = [
-    { id: uid(), name: 'Pillow Talk Lip Liner', brand: 'Charlotte Tilbury', cat: 'Lip', stock: 'in', shade: '#B5838D', emoji: '💄', image: null, notes: 'The perfect MLBB shade. Repurchase always.' },
-    { id: uid(), name: 'Airbrush Flawless Foundation', brand: 'Charlotte Tilbury', cat: 'Face', stock: 'in', shade: '#D4B483', emoji: '✨', image: null, notes: '4 Fair – buildable coverage, loves the skin.' },
-    { id: uid(), name: 'Better Than Sex Mascara', brand: 'Too Faced', cat: 'Lash', stock: 'low', shade: '#2C1A1E', emoji: '👁️', image: null, notes: 'Volumising, slight clumping on 3rd coat.' },
-    { id: uid(), name: 'Satin Lip Colour', brand: 'Bobbi Brown', cat: 'Lip', stock: 'in', shade: '#C0392B', emoji: '💋', image: null, notes: 'Russian Doll – deep berry, very moisturising.' },
-    { id: uid(), name: 'Soft Pinch Blush', brand: 'Rare Beauty', cat: 'Cheek', stock: 'low', shade: '#F9C0C0', emoji: '🌸', image: null, notes: 'Hope – one dot is enough!' },
-    { id: uid(), name: 'Brow Wiz', brand: 'Anastasia Beverly Hills', cat: 'Brow', stock: 'in', shade: '#7B5141', emoji: '✏️', image: null, notes: 'Taupe shade, ultra-fine micro pencil.' },
-    { id: uid(), name: "Pro Filt'r Concealer", brand: 'Fenty Beauty', cat: 'Face', stock: 'in', shade: '#E8C4A0', emoji: '✨', image: null, notes: '170W – brightening and long-lasting.' },
-    { id: uid(), name: 'Gel Nail Colour', brand: 'Dior', cat: 'Nail', stock: 'out', shade: '#DB7050', emoji: '💅', image: null, notes: '770 Dior Granville – coral dream.' },
-  ];
-  saveProducts(seed);
-}
-
-function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
 // ── STATE ──────────────────────────────────────────────────
 let products = [];
@@ -268,6 +287,12 @@ let selectedImage = null; // base64 or null
 let activeFilter = 'all';
 let searchQuery = '';
 let sortMode = 'default';
+
+// ── LOADING STATE ──────────────────────────────────────────
+function setLoading(on) {
+  document.getElementById('productGrid').style.opacity = on ? '0.4' : '1';
+  document.getElementById('fab').style.pointerEvents = on ? 'none' : '';
+}
 
 // ── NOTIFICATIONS ──────────────────────────────────────────
 function getLowStockItems() {
@@ -535,30 +560,45 @@ function getFormData() {
   return { name, brand, cat, stock, notes, shade: selectedShade, emoji: selectedEmoji, image: selectedImage };
 }
 
-function saveProduct() {
+async function saveProduct() {
   const data = getFormData();
   if (!data.name)  { showToast('Please enter a product name'); return; }
   if (!data.brand) { showToast('Please enter a brand name'); return; }
 
-  if (editingId) {
-    const idx = products.findIndex(p => p.id === editingId);
-    if (idx !== -1) products[idx] = { ...products[idx], ...data };
-    showToast('Updated ✓');
-  } else {
-    products.unshift({ id: uid(), ...data });
-    showToast('Added to your stash ✓');
+  document.getElementById('saveBtn').disabled = true;
+  try {
+    if (editingId) {
+      await dbUpdate(editingId, data);
+      const idx = products.findIndex(p => p.id === editingId);
+      if (idx !== -1) products[idx] = { ...products[idx], ...data };
+      showToast('Updated ✓');
+    } else {
+      const newProduct = { id: uid(), ...data };
+      const saved = await dbInsert(newProduct);
+      products.unshift(saved || newProduct);
+      showToast('Added to your stash ✓');
+    }
+    closeModal();
+    render();
+  } catch (e) {
+    showToast('Error saving — check connection');
+    console.error(e);
+  } finally {
+    document.getElementById('saveBtn').disabled = false;
   }
-  saveProducts(products);
-  closeModal();
-  render();
 }
 
-function deleteProduct(id) {
+async function deleteProduct(id) {
   if (!confirm('Remove this from your collection?')) return;
-  products = products.filter(p => p.id !== id);
-  saveProducts(products);
-  render();
-  showToast('Removed from stash');
+  try {
+    await dbDelete(id);
+    products = products.filter(p => p.id !== id);
+    render();
+    showToast('Removed from stash');
+  } catch (e) {
+    showToast('Error deleting — check connection');
+    console.error(e);
+  }
 }
 
 // ── TOAST ──────────────────────────────────────────────────
@@ -628,9 +668,20 @@ document.getElementById('sortSelect').addEventListener('change', e => {
 });
 
 // ── INIT ──────────────────────────────────────────────────
-seedIfEmpty();
-products = loadProducts();
-render();
+// FIX 2: Replaced missing loadProducts() with async dbLoadAll()
+async function init() {
+  setLoading(true);
+  try {
+    products = await dbLoadAll();
+  } catch (e) {
+    showToast('Could not load products — check connection');
+    console.error(e);
+  } finally {
+    setLoading(false);
+    render();
+  }
+}
+init();
 
 // ── SERVICE WORKER ─────────────────────────────────────────
 if ('serviceWorker' in navigator) {
